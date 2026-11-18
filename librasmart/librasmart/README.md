@@ -10,8 +10,6 @@ students the best time to visit the library.
 **Course:** MCA411-2 Python Programming, Component 3 (Assignment)
 **Student:** Sohom Chakraborty | Reg No: 2647250 | 2 MCA-B
 
-![Dashboard screenshot](screenshot.jpg)
-
 ## Features
 - **KPI metric cards:** live occupancy, seats free, peak hour, total visitors, books borrowed, overdue books (with change vs previous period)
 - **Live mode:** auto-refreshing gauge, zone occupancy, ticker and entry/exit feed (demo clock or real IST clock)

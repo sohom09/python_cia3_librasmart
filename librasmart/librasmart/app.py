@@ -443,7 +443,8 @@ def chart_bar_categories(bor, T):
 
 def chart_scatter_books(cat, bor, T):
     fig, ax = new_fig(T)
-    s = cat[cat["ratings_count"] > 0].sample(min(1500, len(cat)), random_state=1)
+    base = cat[cat["ratings_count"] > 0]
+    s = base.sample(min(1500, len(base)), random_state=1)
     top = bor["category"].value_counts().head(4).index.tolist() if not bor.empty else []
     others = s[~s["category"].isin(top)]
     ax.scatter(others["ratings_count"], others["average_rating"], s=9, color=T["muted"], alpha=0.3, label="Other categories")
@@ -646,8 +647,23 @@ ov = overall(occ_f)
 
 span = (d1 - d0).days + 1
 p0, p1 = d0 - pd.Timedelta(days=span), d0 - pd.Timedelta(days=1)
-ent_prev = ENT[in_range(ENT, p0, p1) & ENT["department"].isin(depts) & ENT["zone"].isin(zones)]
-bor_prev = BOR[in_range(BOR, p0, p1) & BOR["department"].isin(depts) & BOR["category"].isin(cats)]
+if p0 >= pd.Timestamp(dmin):
+    base_lo, base_hi = p0, p1
+    now_lo, now_hi = d0, d1
+    cmp_label = "vs previous period"
+else:
+    # no earlier data in the file: compare the second half of the range with the first half
+    mid = d0 + pd.Timedelta(days=span // 2)
+    base_lo, base_hi = d0, mid - pd.Timedelta(days=1)
+    now_lo, now_hi = mid, d1
+    cmp_label = "vs first half of range"
+
+ent_prev = ENT[in_range(ENT, base_lo, base_hi) & ENT["department"].isin(depts) & ENT["zone"].isin(zones)]
+ent_now_cmp = ENT[in_range(ENT, now_lo, now_hi) & ENT["department"].isin(depts) & ENT["zone"].isin(zones)]
+bor_prev = BOR[in_range(BOR, base_lo, base_hi) & BOR["department"].isin(depts) & BOR["category"].isin(cats)]
+bor_now_cmp = BOR[in_range(BOR, now_lo, now_hi) & BOR["department"].isin(depts) & BOR["category"].isin(cats)]
+occ_prev = OCC[in_range(OCC, base_lo, base_hi) & OCC["zone"].isin(zones)]
+occ_now_cmp = OCC[in_range(OCC, now_lo, now_hi) & OCC["zone"].isin(zones)]
 
 with st.sidebar:
     st.divider()
@@ -664,7 +680,7 @@ with st.sidebar:
 L0 = get_live(live_on, refresh, demo)
 st.markdown(
     f'<div class="hero"><div><div class="hero-title">CHRIST LibraSmart</div>'
-    f'<div class="hero-sub">Library seat occupancy and book demand analytics Dashboard</div></div>'
+    f'<div class="hero-sub">Library seat occupancy and book demand analytics</div></div>'
     f'<div class="live-pill"><span class="dot {"" if live_on else "off"}"></span>'
     f'{"Live" if live_on else "Paused"} &middot; {"demo clock" if demo else "IST"}</div></div>',
     unsafe_allow_html=True)
@@ -680,20 +696,36 @@ usual = usual.groupby(["dow", "hour"])["pct"].mean()
 def kpi_panel():
     L = get_live(live_on, refresh, demo)
     seats_used = sum(L["occ"].values())
+    seats_free = TOTAL_SEATS - seats_used
     live_pct = seats_used / TOTAL_SEATS * 100
     usual_now = usual.get((L["clock"].weekday(), L["clock"].hour), np.nan)
     by_hour = ov.groupby("hour")["pct"].mean() if not ov.empty else pd.Series(dtype=float)
     peak_h = int(by_hour.idxmax()) if len(by_hour) else None
+
+    # previous-period comparisons (same length as the selected range, just before it)
+    now_by_hour = overall(occ_now_cmp).groupby("hour")["pct"].mean() if not occ_now_cmp.empty else pd.Series(dtype=float)
+    prev_by_hour = overall(occ_prev).groupby("hour")["pct"].mean() if not occ_prev.empty else pd.Series(dtype=float)
+    peak_delta = pct_change(now_by_hour.max(), prev_by_hour.max()) if len(now_by_hour) and len(prev_by_hour) else np.nan
+    usual_free = TOTAL_SEATS - usual_now / 100 * TOTAL_SEATS
+    free_delta = pct_change(seats_free, usual_free)
+
     overdue_now = bor_f[bor_f["status"] == "Overdue"]
+    overdue_prev = int((bor_prev["status"] == "Overdue").sum())
+    overdue_now_cmp = int((bor_now_cmp["status"] == "Overdue").sum())
+
     cols = st.columns(6)
     cards = [
-        kpi("🪑", "Live occupancy", f"{live_pct:.0f}%", " vs usual for this hour", None if np.isnan(usual_now) else live_pct - usual_now, good_up=False),
-        kpi("✅", "Seats free", f"{int(TOTAL_SEATS - seats_used)}", f"of {TOTAL_SEATS} seats"),
+        kpi("🪑", "Live occupancy", f"{live_pct:.0f}%", " vs usual for this hour",
+            None if np.isnan(usual_now) else live_pct - usual_now, good_up=False),
+        kpi("✅", "Seats free", f"{int(seats_free)}", " vs usual for this hour", free_delta, good_up=True),
         kpi("⏰", "Peak hour", hour_label(peak_h) if peak_h is not None else "-",
-            f"{by_hour.max():.0f}% avg occupancy" if peak_h is not None else ""),
-        kpi("👥", "Total visitors", f"{len(ent_f):,}", " vs previous period", pct_change(len(ent_f), len(ent_prev))),
-        kpi("📚", "Books borrowed", f"{len(bor_f):,}", " vs previous period", pct_change(len(bor_f), len(bor_prev))),
-        kpi("⚠️", "Overdue books", f"{len(overdue_now):,}", f"Rs {int(overdue_now['fine_inr'].sum()):,} fines pending"),
+            f"{by_hour.max():.0f}% avg occupancy" if peak_h is not None else "", peak_delta, good_up=False),
+        kpi("👥", "Visits logged", f"{len(ent_f):,}", f" {cmp_label}",
+            pct_change(len(ent_now_cmp), len(ent_prev)), good_up=True),
+        kpi("📚", "Books borrowed", f"{len(bor_f):,}", f" {cmp_label}",
+            pct_change(len(bor_now_cmp), len(bor_prev)), good_up=True),
+        kpi("⚠️", "Overdue books", f"{len(overdue_now):,}", f"Rs {int(overdue_now['fine_inr'].sum()):,} fines pending",
+            pct_change(overdue_now_cmp, overdue_prev), good_up=False),
     ]
     for c, h in zip(cols, cards):
         c.markdown(h, unsafe_allow_html=True)

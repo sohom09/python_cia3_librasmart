@@ -33,7 +33,7 @@ RNG = np.random.default_rng(42)
 N_DAYS = 35            # days of history
 PEAK_ARRIVALS = 100    # students arriving in the busiest hour of a normal day
 EXAM_MULT = 1.45       # extra footfall during exam week
-BORROWS_PER_DAY = 140  # book issues on a normal weekday
+BORROWS_PER_DAY = 40   # book issues on a normal weekday
 
 # Column names used by different Kaggle book datasets -> our names
 COLUMN_MAP = {
@@ -130,8 +130,11 @@ def load_catalogue():
     df["num_pages"] = df["num_pages"].fillna(df["num_pages"].median() if df["num_pages"].notna().any() else 300).astype(int)
     df["published_year"] = pd.to_numeric(df.get("published_year"), errors="coerce")
     df["published_year"] = df["published_year"].fillna(df["published_year"].median() if df["published_year"].notna().any() else 2005).astype(int)
+    if "isbn13" not in df.columns:
+        df["isbn13"] = ""
+    df["isbn13"] = df["isbn13"].astype(str).str.replace(r"\.0$", "", regex=True).replace({"nan": ""})
     df = df.drop_duplicates(subset="title")
-    return df[["title", "authors", "categories", "published_year", "average_rating", "num_pages", "ratings_count"]], \
+    return df[["title", "authors", "categories", "published_year", "average_rating", "num_pages", "ratings_count", "isbn13"]], \
         "Kaggle: 7k Books with Metadata"
 
 
@@ -144,6 +147,11 @@ def prepare_catalogue():
     present = set(cat["categories"])
     keep = list(cat["categories"].value_counts().head(8).index) + [c for c in ACADEMIC if c in present]
     cat["category"] = np.where(cat["categories"].isin(keep), cat["categories"], "Other")
+    if "isbn13" not in cat.columns:
+        cat.insert(0, "isbn13", "")
+    acad = cat[cat["category"].isin(ACADEMIC)]
+    rest = cat[~cat["category"].isin(ACADEMIC)]
+    cat = pd.concat([acad, rest.sample(n=min(215, len(rest)), random_state=42)])
     cat = cat.drop(columns="categories").reset_index(drop=True)
     cat.insert(0, "book_id", np.arange(1, len(cat) + 1))
     cat.to_csv(DATA / "catalogue.csv", index=False)
@@ -321,7 +329,19 @@ def generate_borrowing(cat, days, exam_days, end):
         "late_days": late_days,
         "fine_inr": late_days * FINE_PER_DAY,
     })
-    return out
+    idx = df["book_idx"].to_numpy()
+    for col in ["isbn13", "published_year", "average_rating", "num_pages", "ratings_count"]:
+        out[col] = cat[col].to_numpy()[idx]
+    out["year_of_study"] = RNG.integers(1, 4, size=n)
+    out["loan_days"] = LOAN_DAYS
+    out["borrow_month"] = out["borrow_date"].dt.strftime("%b %Y")
+    out["borrow_weekday"] = out["borrow_date"].dt.day_name().str[:3]
+    out["exam_week"] = out["borrow_date"].dt.normalize().isin(list(exam_days))
+    cols = ["txn_id", "student_id", "department", "year_of_study", "book_id", "isbn13", "title", "author",
+            "category", "published_year", "average_rating", "num_pages", "ratings_count", "borrow_date",
+            "borrow_month", "borrow_weekday", "exam_week", "due_date", "loan_days", "return_date", "status",
+            "late_days", "fine_inr"]
+    return out[cols]
 
 
 # --------------------------------------------------------------------------- main
@@ -336,7 +356,8 @@ def main():
     bor = generate_borrowing(cat, days, exam_days, end)
 
     pd.DataFrame(ZONES, columns=["floor", "zone", "seats"]).to_csv(DATA / "seat_capacity.csv", index=False)
-    entries.to_csv(DATA / "library_entries.csv", index=False)
+    entries_out = entries.sample(n=min(1500, len(entries)), random_state=42).sort_values("entry_time")
+    entries_out.to_csv(DATA / "library_entries.csv", index=False)
     occ.to_csv(DATA / "occupancy_hourly.csv", index=False)
     bor.to_csv(DATA / "book_borrowing.csv", index=False)
     (DATA / "meta.json").write_text(json.dumps({
@@ -344,6 +365,8 @@ def main():
         "generated_on": str(end.date()),
         "history_days": N_DAYS,
         "n_books": int(len(cat)),
+        "visits_total": int(len(entries)),
+        "visits_in_file": int(len(entries_out)),
         "total_seats": TOTAL_SEATS,
         "exam_week": [str(min(exam_days).date()), str(max(exam_days).date())],
     }, indent=2))
