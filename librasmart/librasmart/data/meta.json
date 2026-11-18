@@ -1,0 +1,11 @@
+{
+  "catalogue_source": "Kaggle: 7k Books with Metadata",
+  "generated_on": "2026-11-17",
+  "history_days": 35,
+  "n_books": 6398,
+  "total_seats": 320,
+  "exam_week": [
+    "2026-11-04",
+    "2026-11-10"
+  ]
+}
