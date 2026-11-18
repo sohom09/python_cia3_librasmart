@@ -6,7 +6,7 @@ An interactive Streamlit dashboard that shows live seat occupancy by floor and z
 most borrowed book categories, overdue returns and fine analysis, and a busy-hour predictor that tells
 students the best time to visit the library.
 
-**Live app:** https://your-app-name.streamlit.app
+**Live app:** https://christ-librasmart-dashboard.streamlit.app/
 **Course:** MCA411-2 Python Programming, Component 3 (Assignment)
 **Student:** Sohom Chakraborty | Reg No: 2647250 | 2 MCA-B
 
